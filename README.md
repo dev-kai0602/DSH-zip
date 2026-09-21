@@ -4,7 +4,7 @@
 
 ## 下载
 
-发行包（约 138 MB）：见本仓库的 [Releases](../../releases) 页面，下载 `DSH-zip.zip`。
+发行包（约 138 MB）：见本仓库的 [Releases](https://github.com/dev-kai0602/DSH-zip/releases) 页面，下载 `DSH-zip.zip`。
 
 ## 包内组成
 
