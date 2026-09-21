@@ -1,0 +1,4 @@
+DSH-zip.zip
+DSH-zip/
+.build/
+*.zip
