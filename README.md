@@ -4,14 +4,21 @@
 
 ## 下载
 
-发行包（约 138 MB）：见本仓库的 [Releases](https://github.com/dev-kai0602/DSH-zip/releases) 页面，下载 `DSH-zip.zip`。
+见本仓库的 [Releases](https://github.com/dev-kai0602/DSH-zip/releases) 页面：
+
+| 发行包 | 内置 Node.js | 说明 |
+|---|---|---|
+| `DSH-zip.zip` | 24.21.0 LTS | 默认版本 |
+| `DSH-zip-node22.zip` | 22.23.2 LTS | 兼容性变体，适合 Windows Server 2016 等较旧环境 |
+
+两个发行包使用同一个启动器：它会自动识别 `assets/` 下内置的 Node 压缩包版本。
 
 ## 包内组成
 
 ```
 DSH-zip/
   DSH-Launcher.exe                  Qt 启动器（PySide6，单文件，无控制台窗口）
-  assets/node-v24.21.0-win-x64.zip  官方 Node.js 运行时（SHA256 已校验）
+  assets/node-v*-win-x64.zip         官方 Node.js 运行时（SHA256 已校验，v24 或 v22）
   deepseek-harness/                  源码与已构建产物
   README.txt                         使用说明
 ```
