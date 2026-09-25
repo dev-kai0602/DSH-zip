@@ -8,13 +8,14 @@ DeepSeek Harness 便携版（Windows x64）
 1. 将压缩包解压到任意目录（路径不要包含中文字符和空格可以获得最佳兼容性）。
 2. 双击目录下的 DSH-Launcher.exe。
 3. 首次运行会自动完成以下步骤（需要联网）：
-   - 解压内置的 Node.js v24 运行时到 runtime\node；
+   - 解压内置的 Node.js 运行时到 runtime\node；
    - 使用 pnpm 在线安装 DeepSeek Harness 的依赖模块（约 1-2 GB，耗时较长）；
    - 启动 dsh web 并自动打开浏览器（默认地址 http://127.0.0.1:3080）。
 4. 后续运行会跳过已完成的安装步骤，直接启动服务。
 
 二、界面说明
 ------------
+启动器使用 tkinter 图形界面（Python 标准库，不依赖任何 Qt 运行库）。
 - 进度条：显示当前安装/下载进度（耗时不确定时显示为滚动状态）。
 - 日志输出栏：实时显示安装与服务日志。
 - 折叠/展开日志：收起或展开日志栏。
@@ -36,8 +37,8 @@ DeepSeek Harness 便携版（Windows x64）
 四、目录结构
 ------------
 DSH-zip\
-  DSH-Launcher.exe            启动器（Qt 界面，联网安装 Node 与依赖并启动服务）
-  assets\node-v24.21.0-win-x64.zip   内置的官方 Node.js 运行时压缩包（可选，缺失时联网下载）
+  DSH-Launcher.exe            启动器（tkinter 界面，联网安装 Node 与依赖并启动服务）
+  assets\node-v*-win-x64.zip  内置的官方 Node.js 运行时压缩包（可选，缺失时联网下载）
   assets\SHASUMS256.txt       官方校验和
   deepseek-harness\           DeepSeek Harness 源码与已构建产物
   runtime\                    首次运行时自动生成（Node 运行时、pnpm 缓存与依赖存储）

@@ -6,7 +6,7 @@ directory that contains this executable, then starts dsh web and opens the
 browser. Runtime user data stays in the default DSH home (USERPROFILE\\.dsh);
 nothing is written outside the application directory and that home.
 
-The same pipeline backs the Qt GUI and the --headless self-test mode, so the
+The same pipeline backs the tkinter GUI and the --headless self-test mode, so the
 install logic can be validated without a display.
 """
 
@@ -437,207 +437,210 @@ def run_headless(args: argparse.Namespace) -> int:
 
 
 def run_gui() -> int:
-    from PySide6.QtCore import Qt, QThread, Signal
-    from PySide6.QtGui import QFont, QTextCursor
-    from PySide6.QtWidgets import (
-        QApplication,
-        QCheckBox,
-        QHBoxLayout,
-        QLabel,
-        QMainWindow,
-        QMessageBox,
-        QPlainTextEdit,
-        QProgressBar,
-        QPushButton,
-        QVBoxLayout,
-        QWidget,
-    )
+    import tkinter as tk
+    from tkinter import messagebox, ttk
 
     layout_paths = Layout(app_dir())
     log_file = LogFile(layout_paths.logs)
+    events: "queue.Queue[tuple]" = queue.Queue()
+    state = {
+        "worker": None,
+        "cancel": threading.Event(),
+        "pipeline": None,
+        "url": WEB_URL,
+        "collapsed": False,
+    }
 
-    class Worker(QThread):
-        logged = Signal(str)
-        status_changed = Signal(str)
-        progressed = Signal(int, int)
-        url_found = Signal(str)
-        finished_ok = Signal()
+    root = tk.Tk()
+    root.title("DeepSeek Harness 便携启动器")
+    root.geometry("880x640")
+    root.minsize(640, 360)
+    root.grid_columnconfigure(0, weight=1)
+    root.grid_rowconfigure(3, weight=1)
 
-        def __init__(self, force: bool) -> None:
-            super().__init__()
-            self.cancel_event = threading.Event()
-            self.pipeline = Pipeline(
-                layout_paths,
-                lambda message: self.logged.emit(message),
-                lambda message: self.status_changed.emit(message),
-                lambda current, total: self.progressed.emit(current, total),
-                self.cancel_event,
-                force,
-                on_url=lambda url: self.url_found.emit(url),
-            )
+    status_var = tk.StringVar(value="准备就绪")
+    force_var = tk.BooleanVar(value=False)
 
-        def run(self) -> None:
-            try:
-                self.pipeline.run()
-            except Cancelled:
-                pass
-            except Exception as error:  # noqa: BLE001 - reported through the log
-                self.logged.emit(f"错误: {error}")
-            finally:
-                self.finished_ok.emit()
+    status_label = ttk.Label(root, textvariable=status_var, wraplength=840, justify="left")
+    status_label.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 4))
 
-        def request_cancel(self) -> None:
-            self.cancel_event.set()
-            self.pipeline.cancel_process()
+    progress = ttk.Progressbar(root, mode="determinate", maximum=100, value=0)
+    progress.grid(row=1, column=0, sticky="ew", padx=10, pady=4)
 
-    class Window(QMainWindow):
-        def __init__(self) -> None:
-            super().__init__()
-            self.setWindowTitle("DeepSeek Harness 便携启动器")
-            self.resize(880, 620)
-            self.worker: Optional[Worker] = None
-            self.log_collapsed = False
-            self.web_url = WEB_URL
+    hint = ttk.Label(
+        root,
+        text=(
+            "首次运行会联网安装依赖模块，可能需要较长时间。"
+            "运行数据保存在 USERPROFILE\\.dsh，不会写入安装目录。"
+        ),
+        wraplength=840,
+        justify="left",
+    )
+    hint.grid(row=2, column=0, sticky="ew", padx=10, pady=4)
 
-            central = QWidget()
-            root = QVBoxLayout(central)
+    log_frame = ttk.Frame(root)
+    log_frame.grid(row=3, column=0, sticky="nsew", padx=10, pady=4)
+    log_frame.grid_columnconfigure(0, weight=1)
+    log_frame.grid_rowconfigure(0, weight=1)
+    log_text = tk.Text(log_frame, wrap="none", height=18, font=("Consolas", 9))
+    log_text.grid(row=0, column=0, sticky="nsew")
+    scroll_y = ttk.Scrollbar(log_frame, orient="vertical", command=log_text.yview)
+    scroll_y.grid(row=0, column=1, sticky="ns")
+    scroll_x = ttk.Scrollbar(log_frame, orient="horizontal", command=log_text.xview)
+    scroll_x.grid(row=1, column=0, sticky="ew")
+    log_text.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set, state="disabled")
 
-            self.status_label = QLabel("准备就绪")
-            self.status_label.setWordWrap(True)
-            root.addWidget(self.status_label)
+    force_check = ttk.Checkbutton(root, text="强制重新安装依赖", variable=force_var)
+    force_check.grid(row=4, column=0, sticky="w", padx=10, pady=4)
 
-            self.progress = QProgressBar()
-            self.progress.setRange(0, 100)
-            self.progress.setValue(0)
-            root.addWidget(self.progress)
+    buttons = ttk.Frame(root)
+    buttons.grid(row=5, column=0, sticky="ew", padx=10, pady=(4, 10))
+    start_button = ttk.Button(buttons, text="开始安装并启动")
+    cancel_button = ttk.Button(buttons, text="取消", state="disabled")
+    toggle_button = ttk.Button(buttons, text="折叠日志")
+    browser_button = ttk.Button(buttons, text="打开浏览器")
+    logs_button = ttk.Button(buttons, text="打开日志目录")
+    for index, button in enumerate(
+        (start_button, cancel_button, toggle_button, browser_button, logs_button)
+    ):
+        button.grid(row=0, column=index, padx=2)
 
-            self.hint = QLabel(
-                "首次运行会联网安装依赖模块，可能需要较长时间。"
-                "运行数据保存在 USERPROFILE\\.dsh，不会写入安装目录。"
-            )
-            self.hint.setWordWrap(True)
-            root.addWidget(self.hint)
+    def append_log(message: str) -> None:
+        log_text.configure(state="normal")
+        log_text.insert("end", message + "\n")
+        if int(log_text.index("end-1c").split(".")[0]) > 20000:
+            log_text.delete("1.0", "10000.0")
+        log_text.see("end")
+        log_text.configure(state="disabled")
+        log_file.write(message)
 
-            self.log_view = QPlainTextEdit()
-            self.log_view.setReadOnly(True)
-            self.log_view.setFont(QFont("Consolas", 9))
-            self.log_view.setMaximumBlockCount(20000)
-            root.addWidget(self.log_view, 1)
+    def on_status(message: str) -> None:
+        status_var.set(message)
+        log_file.write(f"STATUS {message}")
 
-            self.force_box = QCheckBox("强制重新安装依赖")
-            root.addWidget(self.force_box)
+    def on_progress(current: int, total: int) -> None:
+        if total <= 0:
+            progress.configure(mode="indeterminate")
+            progress.start(12)
+        else:
+            progress.stop()
+            progress.configure(mode="determinate", maximum=100, value=int(current * 100 / total))
 
-            buttons = QHBoxLayout()
-            self.start_button = QPushButton("开始安装并启动")
-            self.cancel_button = QPushButton("取消")
-            self.toggle_button = QPushButton("折叠日志")
-            self.browser_button = QPushButton("打开浏览器")
-            self.logs_button = QPushButton("打开日志目录")
-            for button in (
-                self.start_button,
-                self.cancel_button,
-                self.toggle_button,
-                self.browser_button,
-                self.logs_button,
-            ):
-                buttons.addWidget(button)
-            root.addLayout(buttons)
-            self.setCentralWidget(central)
+    def enqueue(kind: str, payload) -> None:
+        events.put((kind, payload))
 
-            self.start_button.clicked.connect(self.start)
-            self.cancel_button.clicked.connect(self.cancel)
-            self.toggle_button.clicked.connect(self.toggle_log)
-            self.browser_button.clicked.connect(self.open_web)
-            self.logs_button.clicked.connect(lambda: self.open_path(layout_paths.logs))
-            self.cancel_button.setEnabled(False)
-            self.log(f"应用目录: {layout_paths.base}")
-            self.log(f"日志文件: {log_file.path}")
-            self.start()
+    def make_pipeline(force: bool) -> Pipeline:
+        return Pipeline(
+            layout_paths,
+            lambda message: enqueue("log", message),
+            lambda message: enqueue("status", message),
+            lambda current, total: enqueue("progress", (current, total)),
+            state["cancel"],
+            force,
+            on_url=lambda url: enqueue("url", url),
+        )
 
-        # -- helpers ---------------------------------------------------------
-        def log(self, message: str) -> None:
-            self.log_view.appendPlainText(message)
-            self.log_view.moveCursor(QTextCursor.MoveOperation.End)
-            log_file.write(message)
+    def worker_run(force: bool) -> None:
+        pipeline = make_pipeline(force)
+        state["pipeline"] = pipeline
+        try:
+            pipeline.run()
+        except Cancelled:
+            pass
+        except Exception as error:  # noqa: BLE001 - surfaced in the log
+            enqueue("log", f"错误: {error}")
+            enqueue("status", f"失败: {error}")
+        finally:
+            enqueue("done", None)
 
-        def open_url(self, url: str) -> None:
-            if os.name == "nt":
-                os.startfile(url)
+    def drain() -> None:
+        try:
+            while True:
+                kind, payload = events.get_nowait()
+                if kind == "log":
+                    append_log(payload)
+                elif kind == "status":
+                    on_status(payload)
+                elif kind == "progress":
+                    on_progress(payload[0], payload[1])
+                elif kind == "url":
+                    state["url"] = payload
+                    append_log(f"Web UI: {payload}")
+                elif kind == "done":
+                    on_done()
+        except queue.Empty:
+            pass
+        root.after(100, drain)
 
-        def open_path(self, path: Path) -> None:
-            path.mkdir(parents=True, exist_ok=True)
-            if os.name == "nt":
-                os.startfile(str(path))
+    def start() -> None:
+        if state["worker"] is not None and state["worker"].is_alive():
+            return
+        state["cancel"].clear()
+        start_button.configure(state="disabled")
+        cancel_button.configure(state="normal")
+        progress.configure(mode="indeterminate")
+        progress.start(12)
+        state["worker"] = threading.Thread(target=worker_run, args=(force_var.get(),), daemon=True)
+        state["worker"].start()
 
-        def open_web(self) -> None:
-            self.open_url(self.web_url)
+    def cancel() -> None:
+        if state["worker"] is not None and state["worker"].is_alive():
+            on_status("正在取消...")
+            state["cancel"].set()
+            pipeline = state["pipeline"]
+            if pipeline is not None:
+                pipeline.cancel_process()
 
-        def on_url(self, url: str) -> None:
-            self.web_url = url
-            self.log(f"Web UI: {url}")
+    def on_done() -> None:
+        start_button.configure(state="normal")
+        cancel_button.configure(state="disabled")
+        progress.stop()
+        progress.configure(mode="determinate", maximum=100, value=0)
 
-        def on_status(self, message: str) -> None:
-            self.status_label.setText(message)
-            log_file.write(f"STATUS {message}")
+    def toggle_log() -> None:
+        state["collapsed"] = not state["collapsed"]
+        if state["collapsed"]:
+            log_frame.grid_remove()
+            toggle_button.configure(text="展开日志")
+            root.geometry("880x240")
+        else:
+            log_frame.grid()
+            toggle_button.configure(text="折叠日志")
+            root.geometry("880x640")
 
-        def on_progress(self, current: int, total: int) -> None:
-            if total <= 0:
-                self.progress.setRange(0, 0)
+    def open_url() -> None:
+        if os.name == "nt":
+            os.startfile(state["url"])
+
+    def open_logs() -> None:
+        layout_paths.logs.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            os.startfile(str(layout_paths.logs))
+
+    def on_close() -> None:
+        if state["worker"] is not None and state["worker"].is_alive():
+            if not messagebox.askyesno("退出", "服务或安装仍在运行，退出会终止它。确定退出吗？"):
                 return
-            self.progress.setRange(0, 100)
-            self.progress.setValue(int(current * 100 / total))
+            state["cancel"].set()
+            pipeline = state["pipeline"]
+            if pipeline is not None:
+                pipeline.cancel_process()
+            state["worker"].join(timeout=10)
+        root.destroy()
 
-        def toggle_log(self) -> None:
-            self.log_collapsed = not self.log_collapsed
-            self.log_view.setVisible(not self.log_collapsed)
-            self.toggle_button.setText("展开日志" if self.log_collapsed else "折叠日志")
-            self.resize(880, 240 if self.log_collapsed else 620)
+    start_button.configure(command=start)
+    cancel_button.configure(command=cancel)
+    toggle_button.configure(command=toggle_log)
+    browser_button.configure(command=open_url)
+    logs_button.configure(command=open_logs)
+    root.protocol("WM_DELETE_WINDOW", on_close)
 
-        def start(self) -> None:
-            if self.worker is not None and self.worker.isRunning():
-                return
-            self.start_button.setEnabled(False)
-            self.cancel_button.setEnabled(True)
-            self.progress.setRange(0, 0)
-            self.worker = Worker(self.force_box.isChecked())
-            self.worker.logged.connect(self.log)
-            self.worker.status_changed.connect(self.on_status)
-            self.worker.progressed.connect(self.on_progress)
-            self.worker.url_found.connect(self.on_url)
-            self.worker.finished_ok.connect(self.on_finished)
-            self.worker.start()
-
-        def cancel(self) -> None:
-            if self.worker is not None and self.worker.isRunning():
-                self.on_status("正在取消...")
-                self.worker.request_cancel()
-
-        def on_finished(self) -> None:
-            self.start_button.setEnabled(True)
-            self.cancel_button.setEnabled(False)
-            if self.progress.maximum() == 0:
-                self.progress.setRange(0, 100)
-                self.progress.setValue(0)
-
-        def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
-            if self.worker is not None and self.worker.isRunning():
-                answer = QMessageBox.question(
-                    self,
-                    "退出",
-                    "服务或安装仍在运行，退出会终止它。确定退出吗？",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                )
-                if answer != QMessageBox.StandardButton.Yes:
-                    event.ignore()
-                    return
-                self.worker.request_cancel()
-                self.worker.wait(10000)
-            event.accept()
-
-    application = QApplication(sys.argv)
-    window = Window()
-    window.show()
-    return application.exec()
+    append_log(f"应用目录: {layout_paths.base}")
+    append_log(f"日志文件: {log_file.path}")
+    drain()
+    root.after(250, start)
+    root.mainloop()
+    return 0
 
 
 def main() -> int:
